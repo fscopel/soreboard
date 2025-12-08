@@ -1,10 +1,10 @@
 import { LayoutProps } from './types';
 
 export const GridLayout = ({ zones, zoneSpans = {}, hiddenZones = new Set() }: LayoutProps) => {
-  const zoneKeys = ['zone1', 'zone2', 'zone3', 'zone4', 'zone5', 'zone6'];
+  const zoneKeys = ['zone1', 'zone2', 'zone3', 'zone4', 'zone5', 'zone6', 'zone7', 'zone8', 'zone9'];
   
   return (
-    <div className="grid grid-cols-3 grid-rows-2 gap-4 p-4 h-full bg-gray-100">
+    <div className="grid grid-cols-3 grid-rows-3 gap-4 p-4 h-full bg-gray-100">
       {zoneKeys.map((key) => {
         // Skip rendering if this zone is hidden (part of a span)
         if (hiddenZones.has(key)) {
