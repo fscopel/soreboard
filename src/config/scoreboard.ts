@@ -7,8 +7,10 @@ export const SCOREBOARD_CONFIG: LayoutConfig & { restaurantName: string } = {
   assignments: {
     'zone1': 'weather',
     'zone2': 'sales',
-    'zone3': 'sales', // Duplicating for demo
-    'zone4': 'weather', // Duplicating for demo
+    'zone3': 'weather', 
+    'zone4': 'helloworld',
+    'zone5': 'laborhours',
+    'zone6': 'laborhours',
     // Split layout mapping
     'sidebar': 'weather',
     'main': 'sales'
