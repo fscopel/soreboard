@@ -8,6 +8,7 @@ export const SCOREBOARD_CONFIG: LayoutConfig & { restaurantName: string } = {
     'zone1': 'weather', 
     'zone2': 'events',
     'zone3': 'laborhours',
+    'zone4': 'laborhours',
     // Split layout mapping
     'sidebar': 'weather',
     'main': 'sales'

@@ -39,7 +39,7 @@ export const LaborHoursModule = () => {
   const { normalData, redData } = createActualDataSeries();
   return (
     <ModuleWrapper title="Labor Hours - Actual vs Schedule">
-      <div className="h-full w-full flex items-center justify-center">
+      <div className="h-full w-full flex items-start justify-center">
         <LineChart
           width={undefined}
           height={400}
