@@ -11,7 +11,9 @@ export const SCOREBOARD_CONFIG: LayoutConfig & { restaurantName: string; videoUr
     'zone2': 'laborhours',
     'zone3': 'laborhours',
     'zone4': 'events',
-    'zone5': 'weather', 
+    'zone5': undefined as any, // keep empty
+    'zone6': 'weather',
+    'zone7': undefined as any,
     // Split layout mapping (used when type: 'split')
     'sidebar': 'weather',
     'main': 'sales'

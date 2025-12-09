@@ -13,9 +13,17 @@ function App() {
   const zoneSpans: Record<string, number> = {};
   const hiddenZones = new Set<string>();
   
+  // Filter assignments based on layout type to avoid cross-layout spanning
+  const isGrid = config.type === 'grid';
+  const assignments = Object.fromEntries(
+    Object.entries(config.assignments).filter(([zoneId]) =>
+      isGrid ? zoneId.startsWith('zone') : zoneId === 'sidebar' || zoneId === 'main'
+    )
+  );
+  
   // Group zones by module ID to detect spanning
   const moduleToZones: Record<string, string[]> = {};
-  Object.entries(config.assignments).forEach(([zoneId, moduleId]) => {
+  Object.entries(assignments).forEach(([zoneId, moduleId]) => {
     if (!moduleToZones[moduleId]) {
       moduleToZones[moduleId] = [];
     }
@@ -23,7 +31,7 @@ function App() {
   });
   
   // Process assignments and handle spanning
-  Object.entries(config.assignments).forEach(([zoneId, moduleId]) => {
+  Object.entries(assignments).forEach(([zoneId, moduleId]) => {
     const moduleDef = getModule(moduleId);
     if (moduleDef) {
       const Component = moduleDef.component;
