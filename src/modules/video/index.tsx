@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type * as cocoSsdType from '@tensorflow-models/coco-ssd';
 import { ModuleWrapper } from '../../components/ModuleWrapper';
 import { SCOREBOARD_CONFIG } from '../../config/scoreboard';
 
@@ -12,6 +13,12 @@ export const VideoModule = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(!!SCOREBOARD_CONFIG.videoUrl);
+  const [personCount, setPersonCount] = useState<number | null>(null);
+  const [visionStatus, setVisionStatus] = useState<string>('');
+  const [lastInferenceMs, setLastInferenceMs] = useState<number | null>(null);
+  const [visionBackend, setVisionBackend] = useState<'webgl' | 'cpu' | null>(null);
+  const isPlayableVideo = !!videoUrl && (videoUrl.endsWith('.m3u8') || /\.(mp4|webm|ogg)(\?.*)?$/i.test(videoUrl));
+  const DETECTION_INTERVAL_MS = 2000;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -80,25 +87,116 @@ export const VideoModule = () => {
     return undefined;
   }, [videoUrl, muted]);
 
+  // Lightweight, on-device person counting using coco-ssd
+  useEffect(() => {
+    if (!isPlayableVideo) return;
+
+    let cancelled = false;
+    let intervalId: number | null = null;
+    let model: cocoSsdType.ObjectDetection | null = null;
+    let tfModule: typeof import('@tensorflow/tfjs') | null = null;
+    let running = false;
+
+    const runDetection = async () => {
+      if (cancelled || !model) return;
+      const video = videoRef.current;
+      if (!video || video.paused || video.readyState < 2 || running) return;
+
+      running = true;
+      const start = performance.now();
+      try {
+        const predictions = await model.detect(video);
+        const people = predictions.filter((p) => p.class === 'person' && p.score >= 0.2);
+        if (!cancelled) {
+          setPersonCount(people.length);
+          setLastInferenceMs(performance.now() - start);
+          setVisionStatus('');
+        }
+      } catch {
+        if (!cancelled) setVisionStatus('Vision inference failed');
+      } finally {
+        running = false;
+      }
+    };
+
+    const initVision = async () => {
+      setVisionStatus('Loading vision model…');
+      try {
+        tfModule = await import('@tensorflow/tfjs');
+        try {
+          await tfModule.setBackend('webgl');
+          await tfModule.ready();
+          setVisionBackend('webgl');
+        } catch {
+          await tfModule.setBackend('cpu');
+          await tfModule.ready();
+          setVisionBackend('cpu');
+        }
+
+        const cocoSsd = await import('@tensorflow-models/coco-ssd');
+        if (cancelled) return;
+        model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        if (cancelled) return;
+
+        setVisionStatus('');
+        runDetection();
+        intervalId = window.setInterval(runDetection, DETECTION_INTERVAL_MS);
+      } catch {
+        if (!cancelled) setVisionStatus('Vision unavailable');
+      }
+    };
+
+    void initVision();
+
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+      if (model && (model as any).dispose) {
+        try { (model as any).dispose(); } catch {}
+      }
+      if (tfModule) {
+        try { tfModule.disposeVariables(); } catch {}
+      }
+    };
+  }, [isPlayableVideo]);
+
   return (
     <ModuleWrapper title="Lobby View">
-      <div className="flex items-center justify-center h-full bg-black">
+      <div className="relative flex flex-col h-full bg-black overflow-hidden -m-4 min-h-0">
         {videoUrl ? (
-          videoUrl.endsWith('.m3u8') || /\.(mp4|webm|ogg)(\?.*)?$/i.test(videoUrl) ? (
-            <video
-              ref={videoRef}
-              className="w-full h-full object-contain"
-              preload="auto"
-              autoPlay
-              muted={muted}
-              playsInline
-              loop
-              onCanPlay={() => setLoading(false)}
-              onPlaying={() => { setLoading(false); setIsPlaying(true); }}
-              onPause={() => setIsPlaying(false)}
-              onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
-              onError={() => { setStatus('Video failed to load'); setLoading(false); }}
-            />
+          isPlayableVideo ? (
+            <>
+              <video
+                ref={videoRef}
+                className="w-full flex-1 object-contain min-h-0"
+                preload="auto"
+                autoPlay
+                muted={muted}
+                playsInline
+                loop
+                onCanPlay={() => setLoading(false)}
+                onPlaying={() => { setLoading(false); setIsPlaying(true); }}
+                onPause={() => setIsPlaying(false)}
+                onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+                onError={() => { setStatus('Video failed to load'); setLoading(false); }}
+              />
+              <div className="w-full bg-black/70 text-white text-sm px-3 py-2 text-center flex-shrink-0">
+                {visionStatus
+                  ? visionStatus
+                  : personCount !== null
+                    ? (
+                      <>
+                        People detected: {personCount}
+                        {lastInferenceMs !== null && (
+                          <span className="ml-2 text-xs text-white/70">
+                            ~{Math.round(lastInferenceMs)} ms {visionBackend ? `(${visionBackend})` : ''}
+                          </span>
+                        )}
+                      </>
+                    )
+                    : 'Initializing vision…'}
+              </div>
+            </>
           ) : (
             <iframe
               src={videoUrl}
@@ -119,7 +217,7 @@ export const VideoModule = () => {
           </div>
         )}
         {/* Simple overlay controls */}
-        {videoUrl && (videoUrl.endsWith('.m3u8') || /\.(mp4|webm|ogg)(\?.*)?$/i.test(videoUrl)) && (
+        {isPlayableVideo && (
           <div className="absolute top-2 right-2 flex gap-2">
             <button
               className="px-3 py-1 text-xs rounded bg-white/80 hover:bg-white text-black shadow"
@@ -148,7 +246,7 @@ export const VideoModule = () => {
             </button>
           </div>
         )}
-        {videoUrl && (videoUrl.endsWith('.m3u8') || /\.(mp4|webm|ogg)(\?.*)?$/i.test(videoUrl)) && (
+        {isPlayableVideo && (
           <div className="absolute bottom-2 right-2 text-xs text-white/90 bg-black/40 px-2 py-1 rounded">
             {formatTime(currentTime)}
           </div>
