@@ -68,7 +68,14 @@ function App() {
         return <SplitLayout zones={resolvedZones} />;
       case 'grid':
       default:
-        return <GridLayout zones={resolvedZones} zoneSpans={zoneSpans} hiddenZones={hiddenZones} />;
+        return (
+          <GridLayout
+            zones={resolvedZones}
+            zoneSpans={zoneSpans}
+            hiddenZones={hiddenZones}
+            rowHeights={config.rowHeights}
+          />
+        );
     }
   };
 

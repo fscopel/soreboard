@@ -12,6 +12,7 @@ export interface LayoutProps {
   zones: Record<string, ReactNode>;
   zoneSpans?: Record<string, number>; // Map of zone names to column span
   hiddenZones?: Set<string>; // Set of zones that should be hidden
+  rowHeights?: Array<string | number>; // Optional row heights for grid layouts
 }
 
 export interface LayoutConfig {
@@ -19,5 +20,6 @@ export interface LayoutConfig {
   type: LayoutType;
   // Map of zone names to module IDs
   assignments: Record<string, string>; 
+  rowHeights?: Array<string | number>; // Optional row heights when using the grid layout
 }
 

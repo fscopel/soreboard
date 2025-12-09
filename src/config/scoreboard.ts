@@ -4,6 +4,8 @@ export const SCOREBOARD_CONFIG: LayoutConfig & { restaurantName: string; videoUr
   id: 'main-dashboard',
   restaurantName: 'Lazy Dog Restaurant - Brea, CA',
   type: 'grid', // Change to 'split' to test SplitLayout
+  // Row heights for the 3x3 grid layout (accepts numbers as fr units or strings like "250px")
+  rowHeights: ['0.7fr', '1fr', '1fr'],
   assignments: {
     // Grid layout: single instance of each module
     

@@ -42,7 +42,6 @@ export const LaborHoursModule = () => {
       <div className="h-full w-full flex items-center justify-center">
         <LineChart
           width={undefined}
-          height={400}
           sx={{ width: '100%', maxWidth: '100%' }}
           xAxis={[
             {

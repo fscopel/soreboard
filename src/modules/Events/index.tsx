@@ -204,7 +204,7 @@ export const EventsModule = () => {
 
   return (
     <ModuleWrapper title="Brea Events">
-      <div className="flex flex-col h-full p-4 space-y-3 max-h-[450px] overflow-y-auto">
+      <div className="flex flex-col h-full p-4 space-y-3 max-h-[650px] overflow-y-auto">
         <div className="text-sm text-gray-600">{status}</div>
         <ul className="space-y-2">
           {events.map((ev) => (
