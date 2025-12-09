@@ -20,7 +20,7 @@ export const VideoModule = () => {
   const [detections, setDetections] = useState<Array<{ bbox: [number, number, number, number] }>>([]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isPlayableVideo = !!videoUrl && (videoUrl.endsWith('.m3u8') || /\.(mp4|webm|ogg)(\?.*)?$/i.test(videoUrl));
-  const DETECTION_INTERVAL_MS = 500;
+  const DETECTION_INTERVAL_MS = 250;
 
   useEffect(() => {
     const video = videoRef.current;

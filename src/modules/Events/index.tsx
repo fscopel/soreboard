@@ -17,10 +17,9 @@ export const EventsModule = () => {
 
   useEffect(() => {
     // Source RSS feeds
-    const feedUrls = [
-      'https://www.cityofbrea.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml',
-      'https://www.eventbrite.com/d/ca--brea/all-events/',
-    ];
+      const feedUrls = [
+        'https://www.cityofbrea.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml',
+      ];
     // Use AllOrigins to bypass CORS and retrieve raw XML for each
     const proxied = feedUrls.map(u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
 
@@ -32,8 +31,9 @@ export const EventsModule = () => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const xmlText = await res.text();
           const parser = new DOMParser();
+          const originalUrl = url;
           // Eventbrite is HTML; RSS sources are XML. Detect based on URL.
-          if (/eventbrite\.com/.test(url)) {
+          if (/eventbrite\.com/.test(originalUrl)) {
             const doc = parser.parseFromString(xmlText, 'text/html');
             // Prefer structured data via JSON-LD if available
             const ldScripts = Array.from(doc.querySelectorAll('script[type="application/ld+json"]'));
@@ -147,24 +147,15 @@ export const EventsModule = () => {
         const results = await Promise.allSettled(proxied.map(fetchAndParse));
         const merged: EventItem[] = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
 
-        // Filter to next 7 days, then sort and limit
-        const now = new Date();
-        const in7 = new Date();
-        in7.setDate(now.getDate() + 7);
-        const upcoming = merged.filter(ev => {
-          const t = Date.parse(ev.date || '');
-          if (isNaN(t)) return false;
-          const d = new Date(t);
-          return d >= now && d <= in7;
-        });
-        const sorted = upcoming.sort((a, b) => {
+        // Only Brea source: sort all and show without external counts
+        const sortedBrea = merged.sort((a, b) => {
           const ta = Date.parse(a.date || '');
           const tb = Date.parse(b.date || '');
           return (isNaN(ta) ? 0 : ta) - (isNaN(tb) ? 0 : tb);
-        }).slice(0, 20);
+        });
 
-        setEvents(sorted);
-        setStatus(sorted.length ? `Found ${sorted.length} events (next 7 days)` : 'No events in next 7 days');
+        setEvents(sortedBrea);
+        setStatus(sortedBrea.length ? `Found ${sortedBrea.length} Brea events` : 'No Brea events found');
       } catch (err) {
         setStatus('Error loading events');
         setEvents([]);
