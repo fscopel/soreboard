@@ -4,6 +4,7 @@ import { SalesModule } from './sales';
 import { LaborHoursModule } from './labor_hours';
 import { EventsModule } from './Events';
 import { VideoModule } from './video';
+import { ReservationsModule } from './reservations';
 
 // This registry will map module IDs to their definitions
 export const MODULE_REGISTRY: Record<string, ScoreboardModule> = {
@@ -31,7 +32,11 @@ export const MODULE_REGISTRY: Record<string, ScoreboardModule> = {
     id: 'video',
     title: 'Video Feed',
     component: VideoModule
-
+  },
+  'reservations': {
+    id: 'reservations',
+    title: 'Today\'s Reservations',
+    component: ReservationsModule
   }
 };
 

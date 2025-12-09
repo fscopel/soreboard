@@ -5,7 +5,7 @@ export const SCOREBOARD_CONFIG: LayoutConfig & { restaurantName: string; videoUr
   restaurantName: 'Lazy Dog Restaurant - Brea, CA',
   type: 'grid', // Change to 'split' to test SplitLayout
   // Row heights for the 3x3 grid layout (accepts numbers as fr units or strings like "250px")
-  rowHeights: ['0.7fr', '1fr', '1fr'],
+  rowHeights: ['1fr', '1fr', '1fr'],
   assignments: {
     // Grid layout: single instance of each module
     
@@ -13,7 +13,7 @@ export const SCOREBOARD_CONFIG: LayoutConfig & { restaurantName: string; videoUr
     'zone2': 'laborhours',
     'zone3': 'laborhours',
     'zone4': 'events',
-    'zone5': undefined as any, // keep empty
+    'zone5': 'reservations',
     'zone6': 'weather',
     'zone7': undefined as any,
     // Split layout mapping (used when type: 'split')
