@@ -17,8 +17,10 @@ export const VideoModule = () => {
   const [visionStatus, setVisionStatus] = useState<string>('');
   const [lastInferenceMs, setLastInferenceMs] = useState<number | null>(null);
   const [visionBackend, setVisionBackend] = useState<'webgl' | 'cpu' | null>(null);
+  const [detections, setDetections] = useState<Array<{ bbox: [number, number, number, number] }>>([]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isPlayableVideo = !!videoUrl && (videoUrl.endsWith('.m3u8') || /\.(mp4|webm|ogg)(\?.*)?$/i.test(videoUrl));
-  const DETECTION_INTERVAL_MS = 2000;
+  const DETECTION_INTERVAL_MS = 500;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -109,6 +111,7 @@ export const VideoModule = () => {
         const people = predictions.filter((p) => p.class === 'person' && p.score >= 0.2);
         if (!cancelled) {
           setPersonCount(people.length);
+          setDetections(people.map(p => ({ bbox: p.bbox as [number, number, number, number] })));
           setLastInferenceMs(performance.now() - start);
           setVisionStatus('');
         }
@@ -160,26 +163,121 @@ export const VideoModule = () => {
     };
   }, [isPlayableVideo]);
 
+  // Draw bounding boxes on canvas overlay
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video || !isPlayableVideo) return;
+
+    const drawBoxes = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Get video display dimensions (accounting for object-contain)
+      const videoRect = video.getBoundingClientRect();
+      const videoNaturalWidth = video.videoWidth;
+      const videoNaturalHeight = video.videoHeight;
+      
+      if (videoNaturalWidth === 0 || videoNaturalHeight === 0) return;
+
+      // Calculate actual displayed video size (object-contain maintains aspect ratio)
+      const videoAspect = videoNaturalWidth / videoNaturalHeight;
+      const containerAspect = videoRect.width / videoRect.height;
+      
+      let displayWidth: number;
+      let displayHeight: number;
+      let offsetX: number;
+      let offsetY: number;
+
+      if (videoAspect > containerAspect) {
+        // Video is wider - fit to width
+        displayWidth = videoRect.width;
+        displayHeight = videoRect.width / videoAspect;
+        offsetX = 0;
+        offsetY = (videoRect.height - displayHeight) / 2;
+      } else {
+        // Video is taller - fit to height
+        displayWidth = videoRect.height * videoAspect;
+        displayHeight = videoRect.height;
+        offsetX = (videoRect.width - displayWidth) / 2;
+        offsetY = 0;
+      }
+
+      // Set canvas size to match video container
+      canvas.width = videoRect.width;
+      canvas.height = videoRect.height;
+
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw green boxes for each detected person
+      ctx.strokeStyle = '#00ff00';
+      ctx.lineWidth = 3;
+
+      detections.forEach((detection) => {
+        const [x, y, width, height] = detection.bbox;
+        
+        // Scale coordinates from video natural size to displayed size
+        const scaleX = displayWidth / videoNaturalWidth;
+        const scaleY = displayHeight / videoNaturalHeight;
+        
+        const boxX = offsetX + (x * scaleX);
+        const boxY = offsetY + (y * scaleY);
+        const boxWidth = width * scaleX;
+        const boxHeight = height * scaleY;
+
+        // Draw rectangle
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+      });
+    };
+
+    // Draw boxes when detections change or video resizes
+    drawBoxes();
+    
+    const resizeObserver = new ResizeObserver(() => {
+      drawBoxes();
+    });
+    resizeObserver.observe(video);
+
+    // Also redraw on video loadedmetadata
+    const handleLoadedMetadata = () => {
+      drawBoxes();
+    };
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+    return () => {
+      resizeObserver.disconnect();
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+    };
+  }, [detections, isPlayableVideo]);
+
   return (
     <ModuleWrapper title="Lobby View">
       <div className="relative flex flex-col h-full bg-black overflow-hidden -m-4 min-h-0">
         {videoUrl ? (
           isPlayableVideo ? (
             <>
-              <video
-                ref={videoRef}
-                className="w-full flex-1 object-contain min-h-0"
-                preload="auto"
-                autoPlay
-                muted={muted}
-                playsInline
-                loop
-                onCanPlay={() => setLoading(false)}
-                onPlaying={() => { setLoading(false); setIsPlaying(true); }}
-                onPause={() => setIsPlaying(false)}
-                onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
-                onError={() => { setStatus('Video failed to load'); setLoading(false); }}
-              />
+              <div className="relative w-full flex-1 min-h-0">
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-contain"
+                  preload="auto"
+                  autoPlay
+                  muted={muted}
+                  playsInline
+                  loop
+                  onCanPlay={() => setLoading(false)}
+                  onPlaying={() => { setLoading(false); setIsPlaying(true); }}
+                  onPause={() => setIsPlaying(false)}
+                  onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+                  onError={() => { setStatus('Video failed to load'); setLoading(false); }}
+                />
+                <canvas
+                  ref={canvasRef}
+                  className="absolute top-0 left-0 w-full h-full pointer-events-none"
+                  style={{ objectFit: 'contain' }}
+                />
+              </div>
               <div className="w-full bg-black/70 text-white text-sm px-3 py-2 text-center flex-shrink-0">
                 {visionStatus
                   ? visionStatus
