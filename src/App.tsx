@@ -79,6 +79,8 @@ function App() {
     }
   };
 
+  
+
   return (
     <div className="min-h-screen bg-gray-200 font-sans text-gray-900 flex flex-col">
        <Header restaurantName={config.restaurantName} />
