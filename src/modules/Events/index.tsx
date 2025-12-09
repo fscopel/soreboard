@@ -16,104 +16,155 @@ export const EventsModule = () => {
   const [status, setStatus] = useState<string>('Loading…');
 
   useEffect(() => {
-    // Lazy Dog Restaurant & Bar – Brea, CA (approx coordinates)
-    // Note: RSS feeds generally do not include precise geo; keeping these
-    // coords documented here for future providers that support radius filters.
-    // const latitude = 33.9153;
-    // const longitude = -117.8880;
-    // const radiusMiles = 5;
-
-    // Comma-separated list of public RSS/ICS feeds exposed via Vite env
-    const feedsEnv = (import.meta.env.VITE_EVENTS_FEEDS as string | undefined)?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
-
-    // Example public feeds (you can replace with local calendars)
-    const defaultFeeds: string[] = [
-      // Use rss2json to avoid CORS on RSS feeds
-      // City or venue calendars can be added here
-      // 'https://api.rss2json.com/v1/api.json?rss_url=https://example.com/events.rss'
+    // Source RSS feeds
+    const feedUrls = [
+      'https://www.cityofbrea.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml',
+      'https://www.eventbrite.com/d/ca--brea/all-events/',
     ];
-
-    const feeds = feedsEnv.length ? feedsEnv : defaultFeeds;
-
-    const fetchFeed = async (feedUrl: string): Promise<EventItem[]> => {
-      try {
-        const res = await fetch(feedUrl);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const items = (data?.items ?? []).map((item: any) => {
-          const name = item?.title ?? 'Untitled';
-          const imageUrl = getImageForEvent(name);
-          return {
-            id: item?.guid ?? item?.link ?? Math.random().toString(36).slice(2),
-            name,
-            date: item?.pubDate ?? item?.date ?? '',
-            source: data?.feed?.title ?? 'Feed',
-            url: item?.link,
-            imageUrl,
-          } as EventItem;
-        });
-        return items;
-      } catch (e) {
-        return [];
-      }
-    };
-
-    const isNearBrea = (text: string) => {
-      const t = (text || '').toLowerCase();
-      return t.includes('brea') || t.includes('92821') || t.includes('orange county');
-    };
+    // Use AllOrigins to bypass CORS and retrieve raw XML for each
+    const proxied = feedUrls.map(u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
 
     const fetchEvents = async () => {
       try {
         setStatus('Loading…');
-        if (!feeds.length) {
-          // Generate mock Brea-area events for the next 7 days
-          const venues = ['Brea Downtown', 'Brea Mall', 'Carbon Canyon Regional Park', 'City of Brea Community Center'];
-          const addresses: Record<string, string> = {
-            'Brea Downtown': '330 W Birch St, Brea, CA 92821',
-            'Brea Mall': '1065 Brea Mall, Brea, CA 92821',
-            'Carbon Canyon Regional Park': '4442 Carbon Canyon Rd, Brea, CA 92823',
-            'City of Brea Community Center': '695 Madison Way, Brea, CA 92821',
-          };
-          const types = ['Live Music', 'Trivia Night', 'Food Truck Rally', 'Outdoor Yoga', 'Art Walk', 'Open Mic', 'Family Movie Night'];
-          // typeImages removed; using getImageForEvent(name) keyword mapping
-          const today = new Date();
-          const mock: EventItem[] = Array.from({ length: 7 }).map((_, i) => {
-            const d = new Date(today);
-            d.setDate(today.getDate() + i);
-            d.setHours(19, 0, 0, 0); // 7:00 PM
-            const name = `Brea ${types[i % types.length]}`;
-            const venue = venues[i % venues.length];
+        const fetchAndParse = async (url: string): Promise<EventItem[]> => {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const xmlText = await res.text();
+          const parser = new DOMParser();
+          // Eventbrite is HTML; RSS sources are XML. Detect based on URL.
+          if (/eventbrite\.com/.test(url)) {
+            const doc = parser.parseFromString(xmlText, 'text/html');
+            // Prefer structured data via JSON-LD if available
+            const ldScripts = Array.from(doc.querySelectorAll('script[type="application/ld+json"]'));
+            let eventsEB: EventItem[] = [];
+            for (const script of ldScripts) {
+              try {
+                const json = JSON.parse(script.textContent || 'null');
+                const list = Array.isArray(json) ? json : (json?.itemListElement || json?.['@graph'] || []);
+                const candidates = Array.isArray(list) ? list : [];
+                for (const item of candidates) {
+                  const entity: any = item?.item || item; // ItemListElement or direct Event
+                  if (entity?.['@type'] === 'Event' || entity?.type === 'Event') {
+                    const title = entity?.name || 'Event';
+                    const start = entity?.startDate || entity?.startTime || '';
+                    const link = entity?.url || undefined;
+                    let dateIso = '';
+                    const parsedStart = Date.parse(start);
+                    if (!isNaN(parsedStart)) dateIso = new Date(parsedStart).toISOString();
+                    const imageUrl = getImageForEvent(title);
+                    eventsEB.push({
+                      id: link ?? `eb-${Math.random().toString(36).slice(2)}`,
+                      name: title,
+                      date: dateIso || start,
+                      source: 'Eventbrite',
+                      url: link,
+                      address: entity?.location?.address?.streetAddress || undefined,
+                      imageUrl,
+                    });
+                  }
+                }
+              } catch (e) {}
+            }
+            // Fallback to DOM card parsing if JSON-LD not present
+            if (eventsEB.length === 0) {
+              const cards = Array.from(doc.querySelectorAll('[data-testid="event-card"], [data-spec="event-card"]'));
+              eventsEB = cards.map((card, i) => {
+                const title = card.querySelector('[data-testid="event-card-title"], [data-spec="event-card-title"], h3, .eds-event-card__formatted-name')?.textContent?.trim() || 'Event';
+                const linkRel = card.querySelector('a[href*="eventbrite.com/e/"]') as HTMLAnchorElement | null;
+                const link = linkRel?.href || undefined;
+                const dateText = card.querySelector('[data-testid="event-card-date"], [data-spec="event-card-date"], time, .eds-event-card-content__sub-title')?.textContent?.trim() || '';
+                let dateIso = '';
+                const parsedDate = Date.parse(dateText);
+                if (!isNaN(parsedDate)) dateIso = new Date(parsedDate).toISOString();
+                const imageUrl = getImageForEvent(title);
+                return {
+                  id: link ?? `eb-${i}-${Math.random().toString(36).slice(2)}`,
+                  name: title,
+                  date: dateIso || dateText,
+                  source: 'Eventbrite',
+                  url: link,
+                  address: undefined,
+                  imageUrl,
+                };
+              });
+            }
+            return eventsEB;
+          }
+          // Default XML RSS parsing
+          const doc = parser.parseFromString(xmlText, 'text/xml');
+          const channelTitle = doc.querySelector('channel > title')?.textContent ?? 'Events';
+          const items = Array.from(doc.querySelectorAll('item'));
+          const eventsParsed: EventItem[] = items.map((item) => {
+            const title = item.querySelector('title')?.textContent ?? 'Untitled';
+            const link = item.querySelector('link')?.textContent ?? undefined;
+            const pubDate = item.querySelector('pubDate')?.textContent ?? '';
+            const description = item.querySelector('description')?.textContent ?? '';
+            // Prefer actual event date (from title/description) over publication date
+            const text = `${title} ${description}`;
+            const patterns: RegExp[] = [
+              // Dec 12, 2025 7:00 PM or December 12, 2025 7:00 PM
+              /(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(AM|PM))?/i,
+              // 12/12/2025 or 12/12/2025 7:00 PM
+              /\b\d{1,2}\/\d{1,2}\/\d{2,4}(?:\s+\d{1,2}:\d{2}\s*(AM|PM))?\b/,
+              // Range with start-end times after a date
+              /(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s*(AM|PM)\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)/i,
+              /\b\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}:\d{2}\s*(AM|PM)\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)\b/,
+            ];
+            let dateIso = '';
+            for (const re of patterns) {
+              const m = text.match(re);
+              if (m) {
+                let candidate = m[0];
+                if (/\s-\s/.test(candidate)) {
+                  candidate = candidate.replace(/\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)/i, '');
+                }
+                const dt = Date.parse(candidate);
+                if (!isNaN(dt)) {
+                  dateIso = new Date(dt).toISOString();
+                  break;
+                }
+              }
+            }
+            if (!dateIso) {
+              const parsed = Date.parse(pubDate);
+              if (!isNaN(parsed)) dateIso = new Date(parsed).toISOString();
+            }
+            const imageUrl = getImageForEvent(title);
             return {
-              id: `mock-${d.getTime()}`,
-              name: `${name} • ${venue}`,
-              date: d.toISOString(),
-              source: 'Mock',
-              url: undefined,
-              address: addresses[venue],
-              imageUrl: getImageForEvent(name),
+              id: link ?? Math.random().toString(36).slice(2),
+              name: title,
+              date: dateIso || pubDate,
+              source: channelTitle,
+              url: link,
+              address: undefined,
+              imageUrl,
             };
           });
-          setEvents(mock);
-          setStatus(`Showing ${mock.length} mock events (next 7 days)`);
-          return;
-        }
-        const all: EventItem[][] = await Promise.all(feeds.map(fetchFeed));
-        const merged = all.flat();
-        // Filter loosely for Brea proximity by text (no geo in RSS)
-        // Also exclude any events that mention Lazy Dog
-        const filtered = merged.filter(ev => {
-          const text = `${ev.name} ${ev.source ?? ''} ${ev.address ?? ''}`.toLowerCase();
-          return isNearBrea(text) && !text.includes('lazy dog');
+          return eventsParsed;
+        };
+
+        const results = await Promise.allSettled(proxied.map(fetchAndParse));
+        const merged: EventItem[] = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+
+        // Filter to next 7 days, then sort and limit
+        const now = new Date();
+        const in7 = new Date();
+        in7.setDate(now.getDate() + 7);
+        const upcoming = merged.filter(ev => {
+          const t = Date.parse(ev.date || '');
+          if (isNaN(t)) return false;
+          const d = new Date(t);
+          return d >= now && d <= in7;
         });
-        // Sort by date asc if parseable
-        const sorted = filtered.sort((a, b) => {
+        const sorted = upcoming.sort((a, b) => {
           const ta = Date.parse(a.date || '');
           const tb = Date.parse(b.date || '');
           return (isNaN(ta) ? 0 : ta) - (isNaN(tb) ? 0 : tb);
-        }).slice(0, 15);
+        }).slice(0, 20);
+
         setEvents(sorted);
-        setStatus(sorted.length ? `Found ${sorted.length} events` : 'No events found');
+        setStatus(sorted.length ? `Found ${sorted.length} events (next 7 days)` : 'No events in next 7 days');
       } catch (err) {
         setStatus('Error loading events');
         setEvents([]);
@@ -139,9 +190,21 @@ export const EventsModule = () => {
     });
   };
 
+  const formatDateOnly = (raw: string) => {
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    return d.toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
   return (
-    <ModuleWrapper title="Nearby Events (Brea)">
-      <div className="flex flex-col h-full p-4 space-y-3">
+    <ModuleWrapper title="Brea Events">
+      <div className="flex flex-col h-full p-4 space-y-3 max-h-[450px] overflow-y-auto">
         <div className="text-sm text-gray-600">{status}</div>
         <ul className="space-y-2">
           {events.map((ev) => (
@@ -153,7 +216,7 @@ export const EventsModule = () => {
                 <div>
                 <div className="text-base font-semibold">{ev.name}</div>
                 <div className="text-sm text-gray-600">
-                  {formatDateTime(ev.date)}{ev.source ? ` • ${ev.source}` : ''}
+                  {(ev.source && ev.source.toLowerCase().includes('brea')) ? formatDateOnly(ev.date) : formatDateTime(ev.date)}{ev.source ? ` • ${ev.source}` : ''}
                 </div>
                 {ev.address ? (
                   <div className="text-sm text-gray-500">{ev.address}</div>
@@ -175,6 +238,103 @@ export const EventsModule = () => {
 function getImageForEvent(name: string): string {
   const n = (name || '').toLowerCase();
   const pick = (emoji: string, color: string = '2563eb') => `https://placehold.co/80x80/${color}/ffffff?text=${encodeURIComponent(emoji)}`;
+  // RF events -> antenna icon
+  if (/\brf\b/.test(n)) {
+    const svg = encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">\n' +
+      '<rect width="80" height="80" rx="8" fill="#0f766e"/>\n' +
+      // mast
+      '<rect x="38" y="26" width="4" height="28" fill="#ffffff"/>\n' +
+      '<rect x="34" y="54" width="12" height="4" fill="#ffffff"/>\n' +
+      // waves
+      '<path d="M40 24 C46 24, 52 30, 52 36" stroke="#a7f3d0" stroke-width="2" fill="none"/>\n' +
+      '<path d="M40 20 C50 20, 58 30, 58 40" stroke="#a7f3d0" stroke-width="2" fill="none"/>\n' +
+      '<path d="M40 24 C34 24, 28 30, 28 36" stroke="#a7f3d0" stroke-width="2" fill="none"/>\n' +
+      '<path d="M40 20 C30 20, 22 30, 22 40" stroke="#a7f3d0" stroke-width="2" fill="none"/>\n' +
+      // signal dot
+      '<circle cx="40" cy="24" r="3" fill="#22d3ee"/>\n' +
+      '</svg>'
+    );
+    return `data:image/svg+xml,${svg}`;
+  }
+  // Holiday events -> fireworks icon
+  if (/(holiday|new\s*year|christmas|hanukkah|thanksgiving|independence\s*day|memorial\s*day|labor\s*day)/.test(n)) {
+    const svg = encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">\n' +
+      '<rect width="80" height="80" rx="8" fill="#111827"/>\n' +
+      // burst 1
+      '<circle cx="26" cy="30" r="2" fill="#f59e0b"/>\n' +
+      '<path d="M26 30 l-10 -4" stroke="#f59e0b" stroke-width="2"/>\n' +
+      '<path d="M26 30 l8 -6" stroke="#f59e0b" stroke-width="2"/>\n' +
+      '<path d="M26 30 l2 10" stroke="#f59e0b" stroke-width="2"/>\n' +
+      // burst 2
+      '<circle cx="54" cy="22" r="2" fill="#3b82f6"/>\n' +
+      '<path d="M54 22 l-9 -3" stroke="#3b82f6" stroke-width="2"/>\n' +
+      '<path d="M54 22 l7 -5" stroke="#3b82f6" stroke-width="2"/>\n' +
+      '<path d="M54 22 l3 9" stroke="#3b82f6" stroke-width="2"/>\n' +
+      // burst 3
+      '<circle cx="40" cy="48" r="2" fill="#ef4444"/>\n' +
+      '<path d="M40 48 l-8 -6" stroke="#ef4444" stroke-width="2"/>\n' +
+      '<path d="M40 48 l10 -2" stroke="#ef4444" stroke-width="2"/>\n' +
+      '<path d="M40 48 l-2 10" stroke="#ef4444" stroke-width="2"/>\n' +
+      // sparkles
+      '<circle cx="20" cy="50" r="1.5" fill="#e5e7eb"/>\n' +
+      '<circle cx="62" cy="40" r="1.5" fill="#e5e7eb"/>\n' +
+      '</svg>'
+    );
+    return `data:image/svg+xml,${svg}`;
+  }
+  // Amazing Circus or Amazing Digital -> circus tent icon
+  if (/\bamazing\s+circus\b/.test(n) || /\bamazing\s+digital\b/.test(n)) {
+    const svg = encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">\n' +
+      '<rect width="80" height="80" rx="8" fill="#dc2626"/>\n' +
+      // tent base
+      '<path d="M16 56 L40 26 L64 56 Z" fill="#f59e0b" stroke="#ffffff" stroke-width="2"/>\n' +
+      // stripes
+      '<path d="M40 26 L28 56" stroke="#ffffff" stroke-width="3"/>\n' +
+      '<path d="M40 26 L40 56" stroke="#ffffff" stroke-width="3"/>\n' +
+      '<path d="M40 26 L52 56" stroke="#ffffff" stroke-width="3"/>\n' +
+      // flag
+      '<path d="M40 20 L40 26" stroke="#ffffff" stroke-width="2"/>\n' +
+      '<path d="M40 20 L50 22 L40 24 Z" fill="#3b82f6"/>\n' +
+      '</svg>'
+    );
+    return `data:image/svg+xml,${svg}`;
+  }
+  // Planning-related events -> map icon
+  if (/(planning\s*meeting|planning\s*\b|planning\s*commission|general\s*plan|zoning)/.test(n)) {
+    const svg = encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">\n' +
+      '<rect width="80" height="80" rx="8" fill="#0ea5e9"/>\n' +
+      // folded map panels
+      '<path d="M14 22 L34 16 L48 22 L66 16 L66 58 L48 64 L34 58 L14 64 Z" fill="#38bdf8" stroke="#ffffff" stroke-width="2"/>\n' +
+      // roads
+      '<path d="M20 28 L40 22 L40 54" stroke="#1f2937" stroke-width="3" fill="none"/>\n' +
+      '<path d="M28 56 L52 50" stroke="#1f2937" stroke-width="3" fill="none"/>\n' +
+      // pin
+      '<path d="M48 36 c0 -6 5 -11 11 -11 s11 5 11 11 c0 8 -11 18 -11 18 s-11 -10 -11 -18" fill="#ef4444"/>\n' +
+      '<circle cx="59" cy="36" r="4" fill="#f8fafc"/>\n' +
+      '</svg>'
+    );
+    return `data:image/svg+xml,${svg}`;
+  }
+  // Council meetings -> table icon
+  if (/(city\s*council|council\s*meeting)/.test(n)) {
+    const svg = encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">\n' +
+      '<rect width="80" height="80" rx="8" fill="#1f2937"/>\n' +
+      '<rect x="12" y="30" width="56" height="16" rx="4" fill="#b45309"/>\n' +
+      '<rect x="18" y="46" width="6" height="12" fill="#92400e"/>\n' +
+      '<rect x="56" y="46" width="6" height="12" fill="#92400e"/>\n' +
+      '<rect x="10" y="24" width="10" height="8" rx="2" fill="#6b7280"/>\n' +
+      '<rect x="60" y="24" width="10" height="8" rx="2" fill="#6b7280"/>\n' +
+      '<rect x="10" y="48" width="10" height="8" rx="2" fill="#6b7280"/>\n' +
+      '<rect x="60" y="48" width="10" height="8" rx="2" fill="#6b7280"/>\n' +
+      '</svg>'
+    );
+    return `data:image/svg+xml,${svg}`;
+  }
   if (/(music|band|concert|dj)/.test(n)) {
     // Use a simple inline SVG music note as the thumbnail image
     const svg = encodeURIComponent(
