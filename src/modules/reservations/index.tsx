@@ -194,7 +194,7 @@ export const ReservationsModule = () => {
 
   return (
     <ModuleWrapper title="Upcoming Reservations">
-      <div className="flex flex-col items-center justify-center h-full space-y-4">
+      <div className="flex flex-col items-center justify-start h-full space-y-4">
         <div className="w-full max-w-3xl flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="text-xs text-gray-500">Source: {source.toUpperCase()}</div>
